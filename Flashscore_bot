@@ -1,0 +1,33 @@
+import os
+from datetime import date
+from supabase import create_client
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+user_lang = {}
+TEXTS = {"fr": {"welcome": "Bienvenue sur Kano Score Pro.\nChoisissez votre langue :", "list_title": "📋 Matchs du jour", "back": "⬅️ Retour"}, "en": {"welcome": "Welcome to Kano Score Pro.\nChoose your language:", "list_title": "📋 Today's Matches", "back": "⬅️ Back"}}
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    kb = [[InlineKeyboardButton("🇫🇷 Français", callback_data="lang_fr"), InlineKeyboardButton("🇬🇧 English", callback_data="lang_en")]]
+    await update.message.reply_text(TEXTS["fr"]["welcome"], reply_markup=InlineKeyboardMarkup(kb))
+async def show_matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    if q.data.startswith("lang_"): user_lang[q.from_user.id] = q.data.split("_")[1]
+    lang = user_lang.get(q.from_user.id, "fr"); t = TEXTS[lang]
+    if q.data.startswith("lang_") or q.data == "back_list":
+        res = supabase.table("matches").select("*").eq("date", str(date.today())).execute()
+        kb = [[InlineKeyboardButton(f"⚽ {m['home']} vs {m['away']}", callback_data=f"match_{m['id']}")] for m in res.data]
+        if not kb: kb = [[InlineKeyboardButton("Aucun match", callback_data="none")]]
+        await q.edit_message_text(t["list_title"], reply_markup=InlineKeyboardMarkup(kb))
+    else:
+        m = supabase.table("matches").select("*").eq("id", int(q.data.split("_")[1])).single().execute().data
+        text = f"*{m['home']} vs {m['away']}*\n1:{m['prob_1']}% X:{m['prob_x']}% 2:{m['prob_2']}%"
+        await q.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(t["back"], callback_data="back_list")]]))
+def main():
+    app = Application.builder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(show_matches, pattern="^(lang_|match_|back_list)"))
+    app.run_polling()
+if __name__ == "__main__": main()
